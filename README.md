@@ -129,6 +129,3 @@ By default, Momentum runs in demo mode with mock data. To enable production feat
 
 MIT
 
-## Acknowledgments
-
-Built for the Mac-a-Thon 2026 hackathon.
