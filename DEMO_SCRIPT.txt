@@ -1,0 +1,52 @@
+MOMENTUM DEMO (2 min) - Backboard Integration Showcase
+======================================================
+
+BACKBOARD APIs WE'RE USING:
+---------------------------
+- Assistants API: Creates "Momentum Assistant" with custom system prompt
+- Memory API: Stores decisions, facts, risks with semantic search
+- Threads API: Creates conversation contexts for task execution
+- Messages API: Sends prompts, receives AI-generated responses
+
+OPENCLAW INTEGRATION:
+- Local agent execution: openclaw agent --local --thinking medium
+- Falls back to Backboard Messages API when local unavailable
+
+
+STEP 1: MEMORY GRAPH (20 sec)
+-----------------------------
+"This is Backboard's Memory API visualized. Each node is stored via
+POST /assistants/{id}/memory with metadata for semantic retrieval."
+
+> Show nodes, mention they're queryable by the AI
+
+
+STEP 2: GENERATE REPORT (30 sec)
+--------------------------------
+"Report generation uses Backboard's Messages API - we create a thread,
+send project context, and get structured analysis back."
+
+> Generate report, save PDF to memory
+> "This PDF is now stored in Backboard Memory for future reference"
+
+
+STEP 3: EMAIL REPORT (30 sec)
+-----------------------------
+"Attaching memory references - these are retrieved via Backboard's
+semantic search before sending to the agent."
+
+> Attach 1 memory, send via Himalaya
+
+
+STEP 4: CREATE TASK WITH CONTEXT (30 sec)
+-----------------------------------------
+"Creating a task with Backboard memory references. When executed,
+OpenClaw pulls this context via the Memory API."
+
+> Create task, attach decision + report PDF, save (don't run)
+
+
+CLOSING (10 sec)
+----------------
+"Momentum + Backboard = persistent AI memory that grows smarter
+with every interaction."
