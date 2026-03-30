@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocalStore } from "@/lib/local-store";
 import type { IntegrationConnection, IntegrationStatus } from "@/lib/types";
 
@@ -93,9 +93,48 @@ function IntegrationCard({
   const isConnected = connection?.status === "connected";
   const config = connection ? statusConfig[connection.status] : null;
 
-  const handleConnect = () => {
+  const handleConnect = async () => {
     setIsConnecting(true);
-    // Mock OAuth flow
+
+    // For Notion, check real API connection
+    if (provider.id === "notion") {
+      try {
+        const res = await fetch("/api/notion/status");
+        const status = await res.json();
+
+        const newConnection: IntegrationConnection = {
+          id: `int-${Date.now()}`,
+          project_id: state.currentProjectId || "",
+          provider: provider.id,
+          name: provider.name,
+          status: status.connected ? "connected" : "error",
+          permissions: status.connected ? provider.permissions : [],
+          last_sync_at: status.connected ? new Date().toISOString() : null,
+          config: { database_id: status.default_database_id },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        dispatch({ type: "UPDATE_INTEGRATION", payload: newConnection });
+      } catch {
+        const newConnection: IntegrationConnection = {
+          id: `int-${Date.now()}`,
+          project_id: state.currentProjectId || "",
+          provider: provider.id,
+          name: provider.name,
+          status: "error",
+          permissions: [],
+          last_sync_at: null,
+          config: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        dispatch({ type: "UPDATE_INTEGRATION", payload: newConnection });
+      }
+      setIsConnecting(false);
+      return;
+    }
+
+    // Mock OAuth flow for other providers
     setTimeout(() => {
       const newConnection: IntegrationConnection = {
         id: `int-${Date.now()}`,
@@ -103,7 +142,7 @@ function IntegrationCard({
         provider: provider.id,
         name: provider.name,
         status: "connected",
-        permissions: provider.permissions.slice(0, 3), // Mock: grant first 3 permissions
+        permissions: provider.permissions.slice(0, 3),
         last_sync_at: new Date().toISOString(),
         config: {},
         created_at: new Date().toISOString(),

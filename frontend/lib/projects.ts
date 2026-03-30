@@ -66,36 +66,9 @@ function getSeedProjects(): Project[] {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       tasks: {
-        todo: [
-          {
-            id: "t1",
-            title: "Review project scope",
-            description: "Align with stakeholders",
-            priority: "P0",
-            owner: "You",
-            due: "Mar 15",
-          },
-          {
-            id: "t2",
-            title: "Set up development environment",
-            priority: "P2",
-            due: "Mar 18",
-          },
-        ],
-        doing: [
-          {
-            id: "t3",
-            title: "Build Momentum UI",
-            description: "Next.js + Tailwind",
-            priority: "P1",
-            owner: "You",
-            due: "Mar 20",
-          },
-        ],
-        done: [
-          { id: "t4", title: "Clone repository" },
-          { id: "t5", title: "Define UI requirements", owner: "You" },
-        ],
+        todo: [],
+        doing: [],
+        done: [],
       },
       memory: {
         decisions: [

@@ -73,6 +73,25 @@ function runMigrations(database: Database.Database) {
     // column may already exist
   }
 
+  // Notion MCP integration columns
+  try {
+    database.exec("ALTER TABLE projects ADD COLUMN notion_database_id TEXT");
+  } catch {
+    // column may already exist
+  }
+
+  try {
+    database.exec("ALTER TABLE tasks ADD COLUMN notion_page_id TEXT");
+  } catch {
+    // column may already exist
+  }
+
+  try {
+    database.exec("ALTER TABLE tasks ADD COLUMN notion_synced_at TEXT");
+  } catch {
+    // column may already exist
+  }
+
   const count = database.prepare("SELECT COUNT(*) as n FROM projects").get() as { n: number };
   if (count.n === 0) seed(database);
 }
@@ -83,13 +102,7 @@ function seed(database: Database.Database) {
     `INSERT INTO projects (id, name, goal, deadline, repo_url, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)`
   ).run("proj-demo", "Momentum MVP", "Ship a minimal AI-powered project dashboard with Gemini, Backboard, and OpenClaw", "2026-03-30", now, now);
 
-  const taskRows = [
-    ["t1", "proj-demo", "todo", "Review project scope", "Align with stakeholders", "P0", "You", "2026-03-15", 0, null],
-    ["t2", "proj-demo", "todo", "Set up dev environment", null, "P2", null, "2026-03-18", 0, null],
-    ["t3", "proj-demo", "doing", "Build dashboard UI", "Next.js + Tailwind", "P1", "You", "2026-03-20", 0, null],
-    ["t4", "proj-demo", "done", "Clone repository", null, null, null, null, 0, null],
-    ["t5", "proj-demo", "done", "Define requirements", null, null, "You", null, 0, null],
-  ];
+  const taskRows: unknown[][] = [];
   const insertTask = database.prepare(
     `INSERT INTO tasks (id, project_id, column_id, title, description, priority, owner, due, blocked, blocker_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
@@ -127,6 +140,7 @@ export interface ProjectRow {
   goal: string | null;
   deadline: string | null;
   repo_url: string | null;
+  notion_database_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -142,6 +156,8 @@ export interface TaskRow {
   due: string | null;
   blocked: number;
   blocker_reason: string | null;
+  notion_page_id: string | null;
+  notion_synced_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -256,4 +272,28 @@ export function getAllMemoryChunks(): MemoryRow[] {
 
 export function getMemoryChunkById(id: string): MemoryRow | undefined {
   return getDb().prepare("SELECT * FROM memory_chunks WHERE id = ?").get(id) as MemoryRow | undefined;
+}
+
+// ============ Notion MCP Integration ============
+
+export function updateProjectNotionDatabase(projectId: string, notionDatabaseId: string | null): void {
+  const now = new Date().toISOString();
+  getDb().prepare("UPDATE projects SET notion_database_id = ?, updated_at = ? WHERE id = ?").run(notionDatabaseId, now, projectId);
+}
+
+export function updateTaskNotionPage(taskId: string, notionPageId: string): void {
+  const now = new Date().toISOString();
+  getDb().prepare("UPDATE tasks SET notion_page_id = ?, notion_synced_at = ?, updated_at = ? WHERE id = ?").run(notionPageId, now, now, taskId);
+}
+
+export function getTaskById(taskId: string): TaskRow | undefined {
+  return getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as TaskRow | undefined;
+}
+
+export function getTasksWithNotionSync(projectId: string): TaskRow[] {
+  return getDb().prepare("SELECT * FROM tasks WHERE project_id = ? AND notion_page_id IS NOT NULL ORDER BY notion_synced_at DESC").all(projectId) as TaskRow[];
+}
+
+export function getTasksWithoutNotionSync(projectId: string): TaskRow[] {
+  return getDb().prepare("SELECT * FROM tasks WHERE project_id = ? AND notion_page_id IS NULL ORDER BY created_at ASC").all(projectId) as TaskRow[];
 }

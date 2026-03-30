@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import type { TaskStatus, TaskPriority, TaskWithMemory, MemoryNode } from "@/lib/types";
 import { getTasks, saveTasks, attachMemoryToTask, detachMemoryFromTask, getGraph } from "@/lib/storage/graphStore";
@@ -309,13 +309,122 @@ export default function TasksPage() {
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority | "">("");
   const [toast, setToast] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
 
-  // Load data
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
+
+  // Sync from Notion
+  const syncFromNotion = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      // Send existing task titles to prevent duplicates
+      const currentTasks = getTasks(projectId);
+      const existingTitles = currentTasks.map((t) => t.title);
+
+      const res = await fetch("/api/notion/pull-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          existing_titles: existingTitles
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.new_tasks && data.new_tasks.length > 0) {
+          // Merge new tasks from Notion into local storage
+          const currentTasks = getTasks(projectId);
+          const existingIds = new Set(currentTasks.map(t => t.id));
+          const existingTitles = new Set(currentTasks.map(t => t.title.toLowerCase()));
+
+          const newTasks = data.new_tasks
+            .filter((t: TaskWithMemory) => !existingIds.has(t.id) && !existingTitles.has(t.title.toLowerCase()))
+            .map((t: TaskWithMemory) => ({ ...t, memoryRefs: [] }));
+
+          if (newTasks.length > 0) {
+            const updatedTasks = [...currentTasks, ...newTasks];
+            saveTasks(projectId, updatedTasks);
+            setTasks(updatedTasks);
+            showToast(`Pulled ${newTasks.length} new tasks from Notion`);
+          } else {
+            const skipped = data.skipped_count || 0;
+            if (skipped > 0) {
+              showToast(`All synced (${skipped} already exist)`);
+            } else {
+              showToast("Already in sync with Notion");
+            }
+          }
+        } else {
+          showToast("No tasks in Notion");
+        }
+      }
+    } catch (err) {
+      console.error("Notion sync failed:", err);
+      showToast("Notion sync failed");
+    }
+    setIsSyncing(false);
+  }, [projectId, showToast]);
+
+  // Push all tasks to Notion
+  const pushToNotion = useCallback(async () => {
+    if (tasks.length === 0) {
+      showToast("No tasks to sync");
+      return;
+    }
+
+    setIsPushing(true);
+    try {
+      const res = await fetch("/api/notion/push-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          tasks: tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            status: t.status,
+            priority: t.priority,
+            owner: t.owner,
+            due: t.due,
+          })),
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.synced_count > 0) {
+          showToast(`Pushed ${data.synced_count} new tasks to Notion`);
+        } else if (data.skipped_count > 0) {
+          showToast(`All ${data.skipped_count} tasks already in Notion`);
+        } else {
+          showToast("No tasks to push");
+        }
+      } else {
+        const error = await res.json();
+        showToast(error.error || "Failed to sync to Notion");
+      }
+    } catch (err) {
+      console.error("Push to Notion failed:", err);
+      showToast("Failed to sync to Notion");
+    }
+    setIsPushing(false);
+  }, [projectId, tasks, showToast]);
+
+  // Load data and sync from Notion
   useEffect(() => {
     setTasks(getTasks(projectId));
     const graph = getGraph(projectId);
     setNodes(graph.nodes);
-  }, [projectId]);
+
+    // Auto-sync from Notion on load
+    syncFromNotion();
+  }, [projectId, syncFromNotion]);
 
   const tasksByStatus = {
     todo: tasks.filter((t) => t.status === "todo"),
@@ -369,7 +478,7 @@ export default function TasksPage() {
     setTasks(getTasks(projectId));
   };
 
-  const handleCreateTask = () => {
+  const handleCreateTask = async () => {
     if (!newTaskTitle.trim()) return;
 
     const now = new Date().toISOString();
@@ -400,11 +509,20 @@ export default function TasksPage() {
     setNewTaskTitle("");
     setNewTaskPriority("");
     setShowNewTaskModal(false);
-  };
 
-  const showToast = (message: string) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 2000);
+    // Sync to Notion (fire and forget)
+    fetch(`/api/projects/${projectId}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: newTask.title,
+        description: newTask.description,
+        priority: newTask.priority,
+        status: newTask.status,
+      }),
+    })
+      .then(() => showToast("Synced to Notion"))
+      .catch((err) => console.error("Failed to sync to Notion:", err));
   };
 
   return (
@@ -417,15 +535,59 @@ export default function TasksPage() {
             Drag memory nodes from the Memory page onto tasks to attach context
           </p>
         </div>
-        <button
-          onClick={() => setShowNewTaskModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          New Task
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={syncFromNotion}
+            disabled={isSyncing}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            title="Pull tasks from Notion"
+          >
+            <svg
+              className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            {isSyncing ? "Pulling..." : "Pull from Notion"}
+          </button>
+          <button
+            onClick={pushToNotion}
+            disabled={isPushing}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            title="Push all tasks to Notion"
+          >
+            <svg
+              className={`w-4 h-4 ${isPushing ? "animate-spin" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+              />
+            </svg>
+            {isPushing ? "Pushing..." : "Push to Notion"}
+          </button>
+          <button
+            onClick={() => setShowNewTaskModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New Task
+          </button>
+        </div>
       </div>
 
       {/* Kanban Board */}

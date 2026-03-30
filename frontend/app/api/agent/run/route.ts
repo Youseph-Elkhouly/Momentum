@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OPENCLAW_CONFIG, detectTaskType, getTaskTypeConfig } from "@/lib/openclaw-config";
+import { addAgentOutputToNotion, isNotionConfigured } from "@/lib/notion-mcp";
 
-const OPENCLAW_URL = process.env.OPENCLAW_URL || "http://localhost:5100";
 const BACKBOARD_API_KEY = process.env.BACKBOARD_API_KEY;
 
 interface TaskContext {
@@ -25,17 +25,21 @@ interface AgentResult {
   taskType: string;
   emailSent?: boolean;
   emailTo?: string;
+  notionSynced?: boolean;
+  notionPageId?: string;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { task, memories, projectName, sendEmail, emailTo } = body as {
+    const { task, memories, projectName, sendEmail, emailTo, syncToNotion, notionPageId } = body as {
       task: TaskContext;
       memories: Array<{ title: string; content: string; type: string }>;
       projectName: string;
       sendEmail?: boolean;
       emailTo?: string;
+      syncToNotion?: boolean;
+      notionPageId?: string;
     };
 
     // Detect task type for specialized handling
@@ -102,6 +106,32 @@ export async function POST(req: NextRequest) {
           name: "Send email",
           status: "failed",
           output: emailError instanceof Error ? emailError.message : "Unknown error",
+        });
+      }
+    }
+
+    // Notion MCP Sync - if task has a notion page ID and sync is requested
+    if (syncToNotion && notionPageId && isNotionConfigured()) {
+      try {
+        await addAgentOutputToNotion(
+          notionPageId,
+          result.output,
+          result.provider === "mock" ? "Demo Agent" : `Momentum AI (${result.provider})`
+        );
+
+        result.notionSynced = true;
+        result.notionPageId = notionPageId;
+        result.steps.push({
+          name: "Sync to Notion",
+          status: "success",
+          output: `Output synced to Notion page`,
+        });
+      } catch (notionError) {
+        console.error("Notion sync error:", notionError);
+        result.steps.push({
+          name: "Sync to Notion",
+          status: "failed",
+          output: notionError instanceof Error ? notionError.message : "Failed to sync to Notion",
         });
       }
     }

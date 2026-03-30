@@ -40,6 +40,7 @@ type Action =
   | { type: "ADD_PROJECT"; payload: Project }
   | { type: "SET_TASKS"; payload: Task[] }
   | { type: "ADD_TASK"; payload: Task }
+  | { type: "MERGE_TASKS"; payload: Task[] }
   | { type: "UPDATE_TASK"; payload: Task }
   | { type: "DELETE_TASK"; payload: string }
   | { type: "SET_RUNS"; payload: Run[] }
@@ -91,6 +92,15 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, tasks: action.payload };
     case "ADD_TASK":
       return { ...state, tasks: [...state.tasks, action.payload] };
+    case "MERGE_TASKS": {
+      // Merge new tasks without duplicates (by id or title)
+      const existingIds = new Set(state.tasks.map((t) => t.id));
+      const existingTitles = new Set(state.tasks.map((t) => t.title.toLowerCase()));
+      const newTasks = action.payload.filter(
+        (t) => !existingIds.has(t.id) && !existingTitles.has(t.title.toLowerCase())
+      );
+      return { ...state, tasks: [...state.tasks, ...newTasks] };
+    }
     case "UPDATE_TASK":
       return {
         ...state,
@@ -182,103 +192,7 @@ function createSeedData(projectId: string): Partial<AppState> {
     updated_at: now,
   };
 
-  const tasks: Task[] = [
-    {
-      id: "task-1",
-      project_id: projectId,
-      title: "Review project scope",
-      description: "Align with stakeholders on MVP features",
-      priority: "P0",
-      owner: "You",
-      owner_type: "human",
-      due: "2026-03-15",
-      status: "todo",
-      stage: "approved",
-      blocked: false,
-      blocker_reason: null,
-      acceptance_criteria: ["All stakeholders sign off", "Scope document updated"],
-      parent_task_id: null,
-      created_by: "human",
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "task-2",
-      project_id: projectId,
-      title: "Set up dev environment",
-      description: "Configure Next.js, Tailwind, and tooling",
-      priority: "P2",
-      owner: null,
-      owner_type: "human",
-      due: "2026-03-18",
-      status: "todo",
-      stage: "approved",
-      blocked: false,
-      blocker_reason: null,
-      acceptance_criteria: [],
-      parent_task_id: null,
-      created_by: "human",
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "task-3",
-      project_id: projectId,
-      title: "Build dashboard UI",
-      description: "Next.js + Tailwind implementation with agent-aware components",
-      priority: "P1",
-      owner: "Agent",
-      owner_type: "agent",
-      due: "2026-03-20",
-      status: "doing",
-      stage: "executing",
-      blocked: false,
-      blocker_reason: null,
-      acceptance_criteria: ["Responsive layout", "All components render", "No console errors"],
-      parent_task_id: null,
-      created_by: "agent",
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "task-4",
-      project_id: projectId,
-      title: "Clone repository",
-      description: null,
-      priority: null,
-      owner: null,
-      owner_type: "human",
-      due: null,
-      status: "done",
-      stage: "completed",
-      blocked: false,
-      blocker_reason: null,
-      acceptance_criteria: [],
-      parent_task_id: null,
-      created_by: "human",
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "task-5",
-      project_id: projectId,
-      title: "Define requirements",
-      description: "Document functional and non-functional requirements",
-      priority: "P1",
-      owner: "You",
-      owner_type: "human",
-      due: null,
-      status: "done",
-      stage: "completed",
-      blocked: false,
-      blocker_reason: null,
-      acceptance_criteria: ["PRD completed"],
-      parent_task_id: null,
-      created_by: "human",
-      created_at: now,
-      updated_at: now,
-    },
-  ];
+  const tasks: Task[] = [];
 
   const memory: MemoryItem[] = [
     {
@@ -544,10 +458,46 @@ function createSeedData(projectId: string): Partial<AppState> {
       project_id: projectId,
       provider: "notion",
       name: "Notion",
-      status: "disconnected",
-      permissions: [],
-      last_sync_at: null,
-      config: {},
+      status: "connected",
+      permissions: ["pages:read", "pages:write", "databases:read"],
+      last_sync_at: new Date(Date.now() - 1800000).toISOString(),
+      config: { workspace: "Momentum Team" },
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: "int-4",
+      project_id: projectId,
+      provider: "google_drive",
+      name: "Google Drive",
+      status: "connected",
+      permissions: ["files:read", "files:write"],
+      last_sync_at: new Date(Date.now() - 900000).toISOString(),
+      config: { folder: "Momentum Projects" },
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: "int-5",
+      project_id: projectId,
+      provider: "jira",
+      name: "Jira",
+      status: "connected",
+      permissions: ["issues:read", "issues:write", "projects:read"],
+      last_sync_at: new Date(Date.now() - 1200000).toISOString(),
+      config: { project: "MOM" },
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: "int-6",
+      project_id: projectId,
+      provider: "linear",
+      name: "Linear",
+      status: "connected",
+      permissions: ["issues:read", "issues:write", "projects:read"],
+      last_sync_at: new Date(Date.now() - 2400000).toISOString(),
+      config: { team: "Momentum" },
       created_at: now,
       updated_at: now,
     },
@@ -585,6 +535,7 @@ interface StoreContextValue {
   createMemory: (content: string, category: MemoryCategory) => MemoryItem;
   approveItem: (id: string) => void;
   rejectItem: (id: string) => void;
+  syncFromNotion: () => Promise<{ synced: number; error?: string }>;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -597,19 +548,19 @@ export function LocalStoreProvider({ children, projectId }: { children: ReactNod
   useEffect(() => {
     const storageKey = `momentum-${projectId}`;
     const stored = localStorage.getItem(storageKey);
+    const seed = createSeedData(projectId);
 
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        dispatch({ type: "INIT", payload: { ...parsed, currentProjectId: projectId } });
+        // Always use seed integrations for demo purposes
+        dispatch({ type: "INIT", payload: { ...parsed, currentProjectId: projectId, integrations: seed.integrations } });
       } catch {
         // If parsing fails, use seed data
-        const seed = createSeedData(projectId);
         dispatch({ type: "INIT", payload: seed });
       }
     } else {
       // No stored data, use seed data
-      const seed = createSeedData(projectId);
       dispatch({ type: "INIT", payload: seed });
     }
   }, [projectId]);
@@ -736,6 +687,14 @@ export function LocalStoreProvider({ children, projectId }: { children: ReactNod
         updated_at: now,
       };
       dispatch({ type: "ADD_TASK", payload: task });
+
+      // Sync to Notion via API (fire and forget)
+      fetch(`/api/projects/${projectId}/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(taskData),
+      }).catch((err) => console.error("Failed to sync task to Notion:", err));
+
       return task;
     },
     [projectId]
@@ -817,6 +776,38 @@ export function LocalStoreProvider({ children, projectId }: { children: ReactNod
     [state.approvals, state.runs]
   );
 
+  // Sync tasks from Notion to Momentum
+  const syncFromNotion = useCallback(async (): Promise<{ synced: number; error?: string }> => {
+    try {
+      const res = await fetch("/api/notion/pull-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        return { synced: 0, error: error.error || "Failed to sync from Notion" };
+      }
+
+      const data = await res.json();
+      if (data.new_tasks && data.new_tasks.length > 0) {
+        dispatch({ type: "MERGE_TASKS", payload: data.new_tasks });
+      }
+      return { synced: data.new_tasks?.length || 0 };
+    } catch (err) {
+      console.error("Failed to sync from Notion:", err);
+      return { synced: 0, error: err instanceof Error ? err.message : "Unknown error" };
+    }
+  }, [projectId]);
+
+  // Auto-sync from Notion on initialization
+  useEffect(() => {
+    if (!state.initialized) return;
+    // Pull tasks from Notion after initial load
+    syncFromNotion();
+  }, [state.initialized, syncFromNotion]);
+
   const value: StoreContextValue = {
     state,
     dispatch,
@@ -834,6 +825,7 @@ export function LocalStoreProvider({ children, projectId }: { children: ReactNod
     createMemory,
     approveItem,
     rejectItem,
+    syncFromNotion,
   };
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
